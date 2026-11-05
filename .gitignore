@@ -1,0 +1,45 @@
+# ===== Unity 生成目录（不用传）=====
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# ===== IDE / 工程文件 =====
+.vs/
+.idea/
+.vscode/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# ===== 构建产物 / 临时 =====
+screenshots/
+.codely-cli/tmp/
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Unity 杂项 =====
+sysinfo.txt
+*.stackdump
+crashlytics-build.properties
+
+# ===== Codely CLI：AI 助手记忆与配置（不公开）=====
+.codely-cli/
+CODELY.md
