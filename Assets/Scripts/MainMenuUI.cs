@@ -17,6 +17,8 @@ namespace Shenyan
 
         [Header("村落层")]
         [SerializeField] GameObject[] villageObjects;
+        [Tooltip("买到海神号后替换的渔村背景（自带海神号停泊）")]
+        [SerializeField] Sprite villageBgWithShip;
 
         [Header("大地图层")]
         [SerializeField] GameObject[] bigMapObjects;
@@ -153,6 +155,7 @@ namespace Shenyan
         public void OpenTangwu()
         {
             SetGroup(tangwuObjects, true);
+            SetShipElements(false);             // 堂屋盖上来时，别让渔船/轿车还在后面晃
             SetAmb(GameAudio.Ambience.Waves);   // 堂屋叠在村落地图上，沿用海浪
             Debug.Log("[主菜单] 进入堂屋");
         }
@@ -162,6 +165,7 @@ namespace Shenyan
         {
             SetGroup(tangwuObjects, false);
             if (dialogue != null) dialogue.Close();
+            ApplyShipState();
             Debug.Log("[主菜单] 回到村落地图");
         }
 
@@ -198,12 +202,14 @@ namespace Shenyan
         {
             if (dialogue != null) dialogue.Close();
             SetGroup(talentObjects, true);
+            SetShipElements(false);
             Debug.Log("[主菜单] 打开天赋面板");
         }
 
         public void CloseTalent()
         {
             SetGroup(talentObjects, false);
+            ApplyShipState();
             Debug.Log("[主菜单] 关闭天赋面板");
         }
 
@@ -276,12 +282,14 @@ namespace Shenyan
         {
             if (dialogue != null) dialogue.Close();
             SetGroup(shopObjects, true);
+            SetShipElements(false);             // 商店是叠加层，别让后面的渔船/轿车继续晃
             Debug.Log("[主菜单] 打开渔具商店");
         }
 
         public void CloseShop()
         {
             SetGroup(shopObjects, false);
+            ApplyShipState();
             Debug.Log("[主菜单] 关闭渔具商店");
         }
 
@@ -343,7 +351,188 @@ namespace Shenyan
             SetGroup(talentObjects, false);
             SetGroup(tangwuObjects, false);
             SetGroup(villageObjects, true);
+            ApplyShipState();                   // 买了海神号：换背景 + 隐藏旧元素 + 显示入口
             SetAmb(GameAudio.Ambience.Waves);   // 村落地图：海浪
+        }
+
+        // ---------------- 海神号 ----------------
+
+        GameObject _shipHotspot;
+        GameObject _fishingHotspot;
+        GameObject _houseHotspot;
+        GameObject _carHotspot;
+
+        /// <summary>根据「是否买了海神号」切换渔村背景与两个入口热区。</summary>
+        public void ApplyShipState()
+        {
+            if (!SaveSystem.ShipPurchased)
+            {
+                if (_shipHotspot != null) _shipHotspot.SetActive(false);
+                if (_fishingHotspot != null) _fishingHotspot.SetActive(false);
+                if (_houseHotspot != null) _houseHotspot.SetActive(false);
+                if (_carHotspot != null) _carHotspot.SetActive(false);
+                return;
+            }
+
+            EnsureShipHotspots();
+
+            if (villageObjects != null)
+            {
+                foreach (var o in villageObjects)
+                {
+                    if (o == null) continue;
+                    if (o.name == "VillageBg")
+                    {
+                        var img = o.GetComponent<UnityEngine.UI.Image>();
+                        if (img != null && villageBgWithShip != null) img.sprite = villageBgWithShip;
+                    }
+                    else if (o.name == "VillageHouse" || o.name == "VillagePier" || o.name == "VillageCar")
+                    {
+                        o.SetActive(false);   // 新背景里已经画好了民居/轿车/栈桥
+                    }
+                }
+            }
+
+            // 堂屋还开着（例如在堂屋里点了大黄 → 异能面板 → 关闭）时不要把入口放出来，
+            // 否则它们会盖在堂屋的门 / 人物上面。
+            // 同理：当前不在村落地图层（大地图 / 酒楼 / 住屋等）时也不能放出来，
+            // 不然会冒在镇子上面挡住别的东西（主人 2026-11-15 反馈）。
+            SetShipElements(!TangwuVisible() && VillageLayerVisible());
+        }
+
+        /// <summary>村落地图这一层现在是不是显示着的（大地图 / 酒楼 / 住屋等层会把它藏起来）。</summary>
+        bool VillageLayerVisible()
+        {
+            if (villageObjects == null) return false;
+            foreach (var o in villageObjects)
+                if (o != null && o.name == "VillageBg") return o.activeSelf;
+            return villageObjects.Length > 0 && villageObjects[0] != null && villageObjects[0].activeSelf;
+        }
+
+        /// <summary>堂屋（含遮罩）当前是否显示着——堂屋是叠在村落上的层，里面不该冒出渔船/轿车这些入口。</summary>
+        bool TangwuVisible()
+        {
+            if (tangwuObjects == null) return false;
+            foreach (var o in tangwuObjects)
+                if (o != null && o.name == "TangwuMask") return o.activeSelf;
+            foreach (var o in tangwuObjects)
+                if (o != null) return o.activeSelf;
+            return false;
+        }
+
+        void EnsureShipHotspots()
+        {
+            if (_shipHotspot != null) return;
+
+            Transform stage = null;
+            Transform villageBg = null;
+            if (villageObjects != null)
+                foreach (var o in villageObjects)
+                    if (o != null && o.name == "VillageBg") { villageBg = o.transform; stage = villageBg.parent; break; }
+            if (stage == null) stage = transform;
+
+            // 先放码头（最大，垫底），再放船/民居/轿车，保证小元素在上面优先响应点击
+            Sprite pierSprite = Resources.Load<Sprite>("Image/UI/主界面/element_pier");
+            _fishingHotspot = MakeHotspot(stage, "PierHotspot",
+                new Vector2(1027.5f, -660f), new Vector2(1009f, 460f), PlayGame, pierSprite);
+
+            // 海神号 → 工厂
+            Sprite shipSprite = Resources.Load<Sprite>("Image/UI/主界面/ship_shentian");
+            _shipHotspot = MakeHotspot(stage, "ShipHotspot",
+                new Vector2(1027.5f, -345f), new Vector2(565f, 240f),
+                () => UnityEngine.SceneManagement.SceneManager.LoadScene("FactoryDemo"),
+                shipSprite);
+
+            // 民居 → 堂屋
+            Sprite houseSprite = Resources.Load<Sprite>("Image/UI/主界面/element_house");
+            _houseHotspot = MakeHotspot(stage, "HouseHotspot",
+                new Vector2(117.5f, -455.5f), new Vector2(235f, 229f),
+                OpenTangwu, houseSprite);
+
+            // 白色轿车 → 大地图
+            Sprite carSprite = Resources.Load<Sprite>("Image/UI/主界面/element_car");
+            _carHotspot = MakeHotspot(stage, "CarHotspot",
+                new Vector2(407.5f, -652.5f), new Vector2(143f, 83f),
+                OpenBigMap, carSprite);
+
+            _fishingHotspot.SetActive(false);
+            _shipHotspot.SetActive(false);
+            _houseHotspot.SetActive(false);
+            _carHotspot.SetActive(false);
+
+            // 层级：村落地图背景 < 四个入口 < 堂屋遮罩/屋内元素。
+            // 不这样排的话，入口会冒到堂屋上面挡住木门和人物。
+            if (villageBg != null)
+            {
+                int idx = villageBg.GetSiblingIndex() + 1;
+                _fishingHotspot.transform.SetSiblingIndex(idx);
+                _shipHotspot.transform.SetSiblingIndex(idx + 1);
+                _houseHotspot.transform.SetSiblingIndex(idx + 2);
+                _carHotspot.transform.SetSiblingIndex(idx + 3);
+            }
+
+            // 并进 villageObjects：切到大地图/酒楼等会隐藏村落的层时，这些元素跟着一起隐藏
+            var list = new System.Collections.Generic.List<GameObject>();
+            if (villageObjects != null) list.AddRange(villageObjects);
+            list.Add(_fishingHotspot);
+            list.Add(_shipHotspot);
+            list.Add(_houseHotspot);
+            list.Add(_carHotspot);
+            villageObjects = list.ToArray();
+        }
+
+        /// <summary>商店 / 异能 / 堂屋这类「村落仍在底层」的层：把新元素单独藏起来。</summary>
+        void SetShipElements(bool on)
+        {
+            if (!SaveSystem.ShipPurchased) return;
+            if (_shipHotspot != null) _shipHotspot.SetActive(on);
+            if (_fishingHotspot != null) _fishingHotspot.SetActive(on);
+            if (_houseHotspot != null) _houseHotspot.SetActive(on);
+            if (_carHotspot != null) _carHotspot.SetActive(on);
+        }
+
+        static GameObject MakeHotspot(Transform parent, string name, Vector2 pos, Vector2 size,
+                                      System.Action onClick, Sprite sprite = null)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(UnityEngine.UI.Image), typeof(UnityEngine.UI.Button));
+            var rect = go.GetComponent<RectTransform>();
+            rect.SetParent(parent, false);
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = size;
+            rect.anchoredPosition = pos;
+
+            var img = go.GetComponent<UnityEngine.UI.Image>();
+            img.sprite = sprite;
+            img.color = sprite != null ? Color.white : new Color(1f, 1f, 1f, 0f);
+            img.raycastTarget = true;
+            img.preserveAspect = false;
+
+            // 点击层按贴图透明度烘焙：透明像素不响应点击（贴图需 Read/Write + FullRect）
+            if (sprite != null && sprite.texture != null && sprite.texture.isReadable)
+                img.alphaHitTestMinimumThreshold = 0.12f;
+
+            var btn = go.GetComponent<UnityEngine.UI.Button>();
+            btn.transition = UnityEngine.UI.Selectable.Transition.ColorTint;
+            btn.targetGraphic = img;
+            var colors = btn.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = Color.white;
+            colors.pressedColor = new Color(0.82f, 0.82f, 0.82f, 1f);
+            colors.selectedColor = Color.white;
+            colors.fadeDuration = 0.06f;
+            btn.colors = colors;
+            btn.onClick.AddListener(() => onClick());
+
+            // 有可见元素时：待机呼吸 + 悬停放大提亮（和渔村其它可点元素一致）
+            // 注意不要再挂 UiPressScale —— 它每帧写 localScale，会把呼吸/悬停缩放顶掉
+            if (sprite != null)
+            {
+                var hover = go.AddComponent<UIScaleOnHover>();
+                hover.Configure(1.06f, true);
+            }
+            return go;
         }
 
         static void SetGroup(GameObject[] group, bool on)

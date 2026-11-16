@@ -153,7 +153,9 @@ namespace Shenyan
                 if (_loadFill != null)
                     _loadFill.fillAmount = Mathf.Clamp01(status.Load / Mathf.Max(1f, status.MaxLoad));
                 if (_fuelFill != null)
-                    _fuelFill.fillAmount = Mathf.Clamp01(status.Fuel / Mathf.Max(1f, status.MaxFuel));
+                    _fuelFill.fillAmount = status.Dockless
+                        ? 1f   // 开阔海域（工厂入口捕鱼）：没有码头、不耗油，油量条常满
+                        : Mathf.Clamp01(status.Fuel / Mathf.Max(1f, status.MaxFuel));
             }
 
             UpdateTimeRow();

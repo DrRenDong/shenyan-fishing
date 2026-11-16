@@ -26,7 +26,7 @@ namespace Shenyan
         Canvas _canvas;
         GameObject _menuPanel, _settingsPanel;
         Font _font;
-        Text _volumeText, _resText, _gyroText, _resetText;
+        Text _volumeText, _resText, _gyroText, _resetText, _uiScaleText;
         bool _resetArmed;
 
         void Awake()
@@ -35,6 +35,7 @@ namespace Shenyan
         }
 
         bool InGame => SceneManager.GetActiveScene().name == "SampleScene";
+        bool InFactory => SceneManager.GetActiveScene().name == "FactoryDemo";
 
         void Build()
         {
@@ -43,8 +44,22 @@ namespace Shenyan
             var canvasGo = new GameObject("MenuCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasGo.transform.SetParent(transform, false);
             _canvas = canvasGo.GetComponent<Canvas>();
-            _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            _canvas.sortingOrder = 40;
+
+            // 工厂模式：菜单按钮必须压在各种面板（排序 5000+）**下面**，否则会挡住建造面板右上角；
+            // 但菜单/设置弹窗又必须盖在面板之上，所以按钮和弹窗拆成两块画布。
+            bool factory = InFactory && Camera.main != null;
+            if (factory)
+            {
+                _canvas.renderMode = RenderMode.ScreenSpaceCamera;
+                _canvas.worldCamera = Camera.main;
+                _canvas.planeDistance = 1f;
+                _canvas.sortingOrder = 4985;    // 低于所有工厂面板，高于场景精灵（约 4022）
+            }
+            else
+            {
+                _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                _canvas.sortingOrder = 40;
+            }
 
             var scaler = canvasGo.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -53,23 +68,54 @@ namespace Shenyan
 
             _font = Font.CreateDynamicFontFromOSFont(new[] { "Microsoft YaHei", "SimHei", "Arial" }, 24);
 
-            // 左下角菜单按钮：右上角被连击数占用，左上角是载重/金币 HUD
+            // 菜单按钮：普通场景放左下角（右上角被连击数占用、左上角是载重/金币 HUD）；
+            // 工厂模式放右上角，让右下角那排功能键不跟它挤。
             var btn = NewImage(canvasGo.transform, "MenuButton");
             var brt = btn.rectTransform;
-            brt.anchorMin = brt.anchorMax = new Vector2(0f, 0f);
-            brt.pivot = new Vector2(0f, 0f);
-            brt.anchoredPosition = new Vector2(20f, 20f);
-            brt.sizeDelta = new Vector2(96f, 96f);
+            if (InFactory)
+            {
+                brt.anchorMin = brt.anchorMax = new Vector2(1f, 1f);
+                brt.pivot = new Vector2(1f, 1f);
+                brt.anchoredPosition = new Vector2(-30f, -30f);
+            }
+            else
+            {
+                brt.anchorMin = brt.anchorMax = new Vector2(0f, 0f);
+                brt.pivot = new Vector2(0f, 0f);
+                brt.anchoredPosition = new Vector2(30f, 30f);
+            }
+            brt.sizeDelta = new Vector2(64f, 64f);
             btn.color = new Color(0f, 0f, 0f, 0.45f);
-            MakeLabel(btn.transform, "☰", 34, Color.white, TextAnchor.MiddleCenter, Vector2.zero, Vector2.zero);
+            MakeLabel(btn.transform, "☰", 24, Color.white, TextAnchor.MiddleCenter, Vector2.zero, Vector2.zero);
             AddButton(btn.gameObject, ToggleMenu);
 
+            // 弹窗画布：菜单/设置必须盖在所有面板之上，单独一层
+            var popupGo = new GameObject("MenuPopupCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            popupGo.transform.SetParent(transform, false);
+            var popup = popupGo.GetComponent<Canvas>();
+            if (factory)
+            {
+                popup.renderMode = RenderMode.ScreenSpaceCamera;
+                popup.worldCamera = Camera.main;
+                popup.planeDistance = 1f;
+                popup.sortingOrder = 5300;
+            }
+            else
+            {
+                popup.renderMode = RenderMode.ScreenSpaceOverlay;
+                popup.sortingOrder = 41;
+            }
+            var popupScaler = popupGo.GetComponent<CanvasScaler>();
+            popupScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            popupScaler.referenceResolution = referenceResolution;
+            popupScaler.matchWidthOrHeight = 0.5f;
+
             // 遮罩层（全屏，点空白关闭）
-            _menuPanel = NewOverlay(canvasGo.transform, "MenuPanel");
+            _menuPanel = NewOverlay(popupGo.transform, "MenuPanel");
             AddButton(_menuPanel, () => SetMenu(false));
 
             // 设置面板（内容固定，只建一次）
-            _settingsPanel = NewOverlay(canvasGo.transform, "SettingsPanel");
+            _settingsPanel = NewOverlay(popupGo.transform, "SettingsPanel");
             BuildSettingsBox(_settingsPanel.transform);
             AddButton(_settingsPanel, () => SetSettings(false));
 
@@ -148,11 +194,11 @@ namespace Shenyan
             rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.anchoredPosition = Vector2.zero;
-            rt.sizeDelta = new Vector2(560f, 560f);
+            rt.sizeDelta = new Vector2(560f, 620f);
             box.color = new Color(0.10f, 0.075f, 0.06f, 0.98f);
             AddButton(box.gameObject, () => { });
 
-            float top = 560f * 0.5f - 56f;
+            float top = 620f * 0.5f - 56f;
             MakeLabel(box.transform, "设　置", 32, new Color(0.98f, 0.93f, 0.80f),
                       TextAnchor.MiddleCenter, new Vector2(0f, top), new Vector2(480f, 50f));
 
@@ -165,7 +211,16 @@ namespace Shenyan
                                     TextAnchor.MiddleCenter, new Vector2(0f, y), new Vector2(120f, 40f));
             MakeSmallButton(box.transform, "-", new Vector2(120f, y), () => ChangeVolume(-0.1f));
             MakeSmallButton(box.transform, "+", new Vector2(190f, y), () => ChangeVolume(0.1f));
-            y -= 78f;
+            y -= 76f;
+
+            // UI 尺寸：手机小屏上字太小，这里整体放大/缩小所有界面
+            MakeLabel(box.transform, "UI 尺寸", 24, new Color(0.95f, 0.90f, 0.78f), TextAnchor.MiddleLeft,
+                      new Vector2(-240f, y), new Vector2(120f, 40f), new Vector2(0f, 0.5f));
+            _uiScaleText = MakeLabel(box.transform, "标准 100%", 22, new Color(0.95f, 0.90f, 0.78f),
+                                     TextAnchor.MiddleCenter, new Vector2(20f, y), new Vector2(170f, 40f));
+            MakeSmallButton(box.transform, "<", new Vector2(120f, y), () => ChangeUiScale(-1));
+            MakeSmallButton(box.transform, ">", new Vector2(190f, y), () => ChangeUiScale(1));
+            y -= 76f;
 
             // 分辨率
             MakeLabel(box.transform, "分辨率", 24, new Color(0.95f, 0.90f, 0.78f), TextAnchor.MiddleLeft,
@@ -174,14 +229,14 @@ namespace Shenyan
                                  TextAnchor.MiddleCenter, new Vector2(20f, y), new Vector2(170f, 40f));
             MakeSmallButton(box.transform, "<", new Vector2(120f, y), () => ChangeResolution(-1));
             MakeSmallButton(box.transform, ">", new Vector2(190f, y), () => ChangeResolution(1));
-            y -= 78f;
+            y -= 76f;
 
             // 陀螺仪
             _gyroText = MakeLabel(box.transform, "开启陀螺仪　关", 24, new Color(0.95f, 0.90f, 0.78f),
                                   TextAnchor.MiddleLeft, new Vector2(-240f, y), new Vector2(340f, 40f),
                                   new Vector2(0f, 0.5f));
             MakeSmallButton(box.transform, "切换", new Vector2(190f, y), ToggleGyro);
-            y -= 86f;
+            y -= 76f;
 
             // 重置存档
             var resetGo = NewImage(box.transform, "ResetBtn");
@@ -194,7 +249,7 @@ namespace Shenyan
             _resetText = MakeLabel(resetGo.transform, "重置存档", 24, new Color(0.98f, 0.90f, 0.80f),
                                    TextAnchor.MiddleCenter, Vector2.zero, Vector2.zero);
             AddButton(resetGo.gameObject, ResetSaveArmed);
-            y -= 90f;
+            y -= 80f;
 
             MakeMenuButton(box.transform, "返　回", y, () => SetSettings(false));
 
@@ -213,11 +268,22 @@ namespace Shenyan
                 bool on = mc != null && mc.GyroEnabled;
                 _gyroText.text = "开启陀螺仪　" + (on ? "开" : "关");
             }
+            if (_uiScaleText != null)
+                _uiScaleText.text = UiScale.AppliesHere
+                    ? UiScale.Label + " " + Mathf.RoundToInt(UiScale.Value * 100f) + "%"
+                    : "仅工厂生效";
         }
 
         void ChangeVolume(float delta)
         {
             AudioListener.volume = Mathf.Clamp01(AudioListener.volume + delta);
+            RefreshSettingsTexts();
+        }
+
+        void ChangeUiScale(int dir)
+        {
+            if (dir > 0) UiScale.Next();
+            else UiScale.Prev();
             RefreshSettingsTexts();
         }
 

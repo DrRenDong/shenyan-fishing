@@ -26,6 +26,13 @@ namespace Shenyan
         [SerializeField] AudioClip ignitionClip;     // 进大地图的点火发动声
         [SerializeField] AudioClip[] uiClickClips;   // 商店 / 异能面板点击
 
+        [Header("玩法音效（工厂）")]
+        [SerializeField] AudioClip buildClip;        // 建造
+        [SerializeField] AudioClip landClip;         // 放置地块组
+        [SerializeField] AudioClip orderClip;        // 交付订单
+        [SerializeField] AudioClip blueprintClip;    // 工程模式（展开图纸）
+        [SerializeField] AudioClip powerClip;        // 电力模式
+
         [Header("一次性音效")]
         [SerializeField] AudioClip[] splashClips;   // 钩子入水
         [SerializeField] AudioClip[] comboClips;    // 连击：鱼拍在甲板上（每次滚一条消息响一次）
@@ -56,9 +63,28 @@ namespace Shenyan
         {
             if (Instance != null) return Instance;
             var existing = FindObjectOfType<GameAudio>();
-            if (existing != null) return existing;
+            if (existing != null)
+            {
+                Instance = existing;
+                return existing;
+            }
             var go = new GameObject("GameAudio");
             return go.AddComponent<GameAudio>();
+        }
+
+        /// <summary>叠加加载捕鱼场景前把工厂那份让出来（它的物体马上会被禁用）。</summary>
+        public static void ClearInstance() => Instance = null;
+
+        /// <summary>回到工厂场景后，让重新激活的 GameAudio 接管。</summary>
+        public static void RebindFromScene()
+        {
+            if (Instance != null) return;
+            Instance = FindObjectOfType<GameAudio>();
+        }
+
+        void OnEnable()
+        {
+            if (Instance == null) Instance = this;
         }
 
         void Awake()
@@ -189,6 +215,14 @@ namespace Shenyan
             src.pitch = pitch + Random.Range(-pitchJitter, pitchJitter);
             src.PlayOneShot(clip, sfxVolume * Mathf.Clamp01(volumeScale));
         }
+
+        // ---------------- 工厂玩法音效 ----------------
+
+        public void PlayBuildSfx(float v = 0.8f) => Play(buildClip, v, 0.05f);
+        public void PlayLandSfx(float v = 0.9f) => Play(landClip, v, 0.04f);
+        public void PlayOrderSfx(float v = 0.8f) => Play(orderClip, v, 0.03f);
+        public void PlayBlueprintSfx(float v = 0.75f) => Play(blueprintClip, v, 0f);
+        public void PlayPowerSfx(float v = 0.75f) => Play(powerClip, v, 0f);
 
         void OnDestroy()
         {

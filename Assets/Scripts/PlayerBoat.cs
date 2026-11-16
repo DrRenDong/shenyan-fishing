@@ -157,6 +157,22 @@ namespace Shenyan
             }
         }
 
+        /// <summary>换一套船贴图（从工厂地图进捕鱼时换成「海神号」）。facesRight = 原图船头是否朝右。</summary>
+        public void SetBoatSprite(Sprite sprite, bool facesRight = true)
+        {
+            if (sprite == null) return;
+            boatSprite = sprite;
+            spriteFacesRight = facesRight;
+            Build();
+        }
+
+        /// <summary>换一种海域时重设空气墙（开阔海域没有码头，左边不用卡在 x=10）。</summary>
+        public void SetSailLimits(float min, float max)
+        {
+            minX = min;
+            maxX = Mathf.Max(min + 1f, max);
+        }
+
         /// <summary>镜头换水位时同步调用。</summary>
         public void SetWaterLevel(float y)
         {

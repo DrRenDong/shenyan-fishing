@@ -18,6 +18,16 @@ namespace Shenyan
         RectTransform _rt;
         int _lastW = -1;
         int _lastH = -1;
+        float _userScale = 1f;
+
+        /// <summary>设置面板里的「UI 尺寸」档位（1 = 标准）。</summary>
+        public void SetUserScale(float k)
+        {
+            k = Mathf.Clamp(k, 0.5f, 2f);
+            if (Mathf.Approximately(k, _userScale)) return;
+            _userScale = k;
+            Apply();
+        }
 
         void Awake()
         {
@@ -39,7 +49,7 @@ namespace Shenyan
             float sx = _lastW / designSize.x;
             float sy = _lastH / designSize.y;
             // 村落/堂屋用 cover（整张场景铺满）；大地图用 fit（渔村在右下角，裁了会点不到）
-            float s = cover ? Mathf.Max(sx, sy) : Mathf.Min(sx, sy);
+            float s = (cover ? Mathf.Max(sx, sy) : Mathf.Min(sx, sy)) * _userScale;
 
             _rt.sizeDelta = designSize;
             _rt.localScale = new Vector3(s, s, 1f);

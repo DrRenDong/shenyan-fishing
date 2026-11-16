@@ -53,7 +53,33 @@ namespace Shenyan
 
         [Header("钓鱼钩子")]
         [SerializeField] Sprite hookSprite;
+        [SerializeField] Sprite[] clawFrames;             // 抓钩：张开 → 闭合（捕鱼入口抓到海底目标时用）
         [SerializeField] float hookDropY = 16f;          // 钩子入水高度
+
+        [Header("捕鱼入口：从船尾绞盘出线")]
+        [SerializeField] bool useBoatAnchor = false;                              // 不显示主角、线从船尾绞盘伸出
+        [SerializeField] Vector2 boatAnchorOffset = new Vector2(2.3f, 0.6f);      // 相对船中心（原图朝左时船尾在 +x）
+
+        /// <summary>设置抓钩的动画帧（从工厂地图进捕鱼时由 FishingSession 传进来）。</summary>
+        public void SetClawSprites(Sprite[] frames)
+        {
+            if (frames != null && frames.Length > 0) clawFrames = frames;
+        }
+
+        /// <summary>捕鱼入口：不显示主角，鱼线/抓钩一律从船尾绞盘伸出。</summary>
+        public void SetBoatAnchorMode(bool on)
+        {
+            useBoatAnchor = on;
+            SetActorVisible(!on);
+        }
+
+        /// <summary>显示/隐藏主角（隐藏后仍保留操作逻辑）。</summary>
+        public void SetActorVisible(bool visible)
+        {
+            if (_renderer == null) _renderer = GetComponent<SpriteRenderer>();
+            foreach (var r in GetComponentsInChildren<SpriteRenderer>(true))
+                if (r != null) r.enabled = visible;
+        }
 
         [Header("船况")]
         [SerializeField] BoatStatus boatStatus;
@@ -299,12 +325,21 @@ namespace Shenyan
             var hook = go.GetComponent<FishingHook>();
             _hook = hook;
 
-            // 钩子从船中心入水（船 sprite 的中心就是父对象的位置）
+            // 钩子从船中心入水（船 sprite 的中心就是父对象的位置）；
+            // 捕鱼入口改成从船尾绞盘出线
             Transform boat = transform.parent;
             float centerX = boat != null ? boat.position.x : transform.position.x;
+            if (useBoatAnchor) centerX = RodTipPosition.x;
             var start = new Vector3(centerX, hookDropY, 0f);
 
             hook.Drop(start, boat, this, FindObjectOfType<SandbarTerrain>(), FindObjectOfType<CameraFollow>());
+
+            // 海底目标就在船下方：这一竿自动换成抓钩（碰到鱼没有效果，只抓沉船/宝藏）
+            if (clawFrames != null && clawFrames.Length > 0 &&
+                FishingSession.Instance != null && FishingSession.Instance.IsWreckUnderBoat(centerX))
+            {
+                hook.EnableClaw(clawFrames);
+            }
             GameAudio.Ensure().PlaySplash();
 
             // 到顶自动回收结算
@@ -332,6 +367,10 @@ namespace Shenyan
                     // 只有一条鱼时把名字也传过去：空船一竿满仓时船上要直接显示这条鱼
                     string single = catches.Count == 1 ? catches[0].name : null;
                     boatStatus.AddCatch(value, weight, hook.CaughtCount, single);
+
+                    // 按品种记账：从工厂地图进来捕鱼，返回后鱼按品种进船背包
+                    for (int i = 0; i < catches.Count; i++)
+                        boatStatus.RecordCatch(catches[i].name, catches[i].weight);
                 }
 
                 // 经验：连击越高指数增长（本竿第几条决定倍率）
@@ -381,6 +420,14 @@ namespace Shenyan
         {
             get
             {
+                // 捕鱼入口：线从船尾的绞盘出来（船中心 + 朝向偏移），不跟主角位置
+                if (useBoatAnchor && transform.parent != null)
+                {
+                    float sign = _mirrored ? -1f : 1f;
+                    Vector3 basePos = transform.parent.position;
+                    return basePos + new Vector3(sign * boatAnchorOffset.x, boatAnchorOffset.y, 0f);
+                }
+
                 // 16 PPU、scale 0.9 换算成世界单位；镜像时 x 偏移取反
                 float dir = _mirrored ? -1f : 1f;
                 Vector3 offset = new Vector3(dir * -0.113f, 1.688f, 0f);
@@ -448,6 +495,12 @@ namespace Shenyan
             if (hint != null) hint.Show("鱼雷炸到 " + count + " 条，+" + value + " 金（半价）");
             Debug.Log("[鱼雷] 炸到 " + count + " 条 / " + weight.ToString("0.0") + "kg，+" + value + " 金");
         }
+        /// <summary>换钩爪贴图（从工厂地图进捕鱼时换成机械抓斗）。</summary>
+        public void SetHookSprite(Sprite sprite)
+        {
+            if (sprite != null) hookSprite = sprite;
+        }
+
         /// <summary>洒饵：消耗一个，短时间把附近的鱼吸到船下方。</summary>
         void UseBait()
         {

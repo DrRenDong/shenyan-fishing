@@ -65,6 +65,15 @@ namespace Shenyan
         [SerializeField] int lineSortingOrder = 3;
         [SerializeField] Color lineColor = new Color(0.95f, 0.95f, 0.9f, 0.85f);
 
+        [Header("抓钩（沉船 / 宝藏）")]
+        [SerializeField] float clawTouchPad = 0.5f;        // 按包围盒判定时额外放宽的余量
+        [SerializeField] float clawCarryOffset = 0.55f;    // 目标挂在钩子下方的距离
+
+        SpriteRenderer _renderer;
+        Sprite[] _clawFrames;
+        bool _clawMode;     // 这一竿是抓钩（不勾鱼）
+        bool _clawed;       // 已经咬住海底目标
+
         Vector3 _velocity;
         Vector3 _slowStartVelocity;    // 勾到鱼那一刻的速度，用来做线性减速
         float _reelSpeed;              // 回收阶段当前速度
@@ -118,6 +127,19 @@ namespace Shenyan
 
         /// <summary>到水面时触发一次（自动回收结算用）。</summary>
         public System.Action<FishingHook> OnFinished;
+
+        /// <summary>这一竿换成抓钩：碰到鱼没有效果，只抓海底的沉船 / 宝藏。</summary>
+        public void EnableClaw(Sprite[] frames)
+        {
+            _clawMode = true;
+            _clawFrames = frames;
+            if (_renderer == null) _renderer = GetComponent<SpriteRenderer>();
+            if (_renderer != null && frames != null && frames.Length > 0)
+                _renderer.sprite = frames[0];        // 张开
+            if (_collider != null) _collider.size = hookColliderSize * 2f;
+        }
+
+        public bool ClawMode => _clawMode;
 
         bool _settled;
         public bool Settled => _settled;
@@ -206,6 +228,7 @@ namespace Shenyan
             var sr = GetComponent<SpriteRenderer>();
             if (sr != null)
             {
+                _renderer = sr;
                 if (hookSprite != null) sr.sprite = hookSprite;
                 sr.sortingLayerName = sortingLayer;
                 sr.sortingOrder = sortingOrder;
@@ -266,6 +289,7 @@ namespace Shenyan
             if (_angler != null) _anchor = _angler.RodTipPosition;
 
             CheckFishCatch();
+            CheckClaw();
 
             switch (_state)
             {
@@ -279,6 +303,7 @@ namespace Shenyan
 
             ApplyLineConstraint();
             MoveAndCollide(dt);
+            ClawCarry();
             ArrangeCaught();
 
             Vector3 lineDir = _anchor - transform.position;
@@ -349,6 +374,15 @@ namespace Shenyan
             {
                 _velocity = Vector3.zero;
                 _state = HookState.Done;
+
+                // 抓钩把海底目标拉上来了：给宝物、标记这处已打捞
+                if (_clawed)
+                {
+                    _clawed = false;
+                    var session = FishingSession.Instance;
+                    if (session != null) session.CollectWreck();
+                }
+
                 // 到顶自动回收：通知船上来结算
                 if (OnFinished != null)
                 {
@@ -540,10 +574,26 @@ namespace Shenyan
             go.transform.position = new Vector3(cx + (fromLeft ? -(halfW + summonStartMargin) : (halfW + summonStartMargin)),
                                                 transform.position.y, 0f);
 
-            while (go != null && Vector3.Distance(go.transform.position, transform.position) > 0.8f)
+            // 飞向「大鱼」而不是钩子：钩子收线/被销毁时不会把召唤物带着满图跑
+            Vector3 target = _bigFish != null ? _bigFish.transform.position : transform.position;
+
+            // 兜底：如果战斗提前结束、钩子被销毁，下面的协程会跟着停，
+            // 召唤物不能就这么定在半路上（主人 2026-11-15 反馈）——交给它自己飞完剩下的一段。
+            var fx = go.AddComponent<SummonStrikeFx>();
+            fx.life = 1.5f;
+            fx.speed = summonSpeed;
+            fx.target = target;
+
+            float flight = 0f;
+            while (go != null && flight < 2.5f)
             {
-                go.transform.position = Vector3.MoveTowards(go.transform.position, transform.position,
+                if (_bigFish != null) target = _bigFish.transform.position;
+                fx.target = target;
+                if (Vector3.Distance(go.transform.position, target) <= 0.8f) break;
+
+                go.transform.position = Vector3.MoveTowards(go.transform.position, target,
                                                             summonSpeed * Time.deltaTime);
+                flight += Time.deltaTime;
                 yield return null;
             }
             if (go != null) Destroy(go);
@@ -650,6 +700,9 @@ namespace Shenyan
 
         void CheckFishCatch()
         {
+            // 抓钩这一竿不勾鱼（主人的规则：碰到鱼没有效果）
+            if (_clawMode) return;
+
             // 战斗期间不判定其它鱼（主人要求：期间不会再和其它鱼碰撞）
             if (_state == HookState.Battle) return;
 
@@ -661,16 +714,25 @@ namespace Shenyan
                 var fish = h.GetComponent<FishEntity>();
                 if (fish == null || fish.hooked) continue;
 
+                // 正在被「威慑」吓跑的鱼：还没跑出碰撞范围，这段时间不算咬钩
+                if (fish.fleeTimer > 0f) continue;
+
                 if (_state == HookState.Reeling)
                 {
+                    // 收线回程：
+                    //   - 小鱼：不管钩上空不空，路上碰到都能串上来（提前回钩也照样连击）；
+                    //   - 大鱼：空钩时不会被咬（避免「收着空钩突然进战斗」），
+                    //           已经串了小鱼才会过来抢（丢掉小鱼、只留大鱼）。
                     if (fish.IsBig)
                     {
-                        // 战斗结束后的收线回程：已经挂着的那条大鱼不能被新的大鱼挤掉
-                        // （否则旧鱼被销毁、还会莫名其妙再打一场；主人 2026-11-05 反馈）
+                        if (_caught.Count == 0) continue;
                         if (_bigFish != null) continue;
                         CatchBig(fish);
                     }
-                    else CatchSmall(fish);
+                    else
+                    {
+                        CatchSmall(fish);
+                    }
                 }
                 else if (_state == HookState.Sinking || _state == HookState.Slowing)
                 {
@@ -681,6 +743,7 @@ namespace Shenyan
                     if (!fish.intimidated && _intimidatedThisCast < AbilityData.IntimidateSkip)
                     {
                         fish.intimidated = true;
+                        fish.StartFlee(transform.position);   // 真的往远窜，不是只跳过一帧
                         _intimidatedThisCast++;
                         continue;
                     }
@@ -690,8 +753,44 @@ namespace Shenyan
             }
         }
 
-        void CatchSmall(FishEntity fish)
+        /// <summary>抓钩碰到海底的沉船 / 宝藏：自动闭合 + 收线。</summary>
+        void CheckClaw()
         {
+            if (!_clawMode || _clawed) return;
+
+            var session = FishingSession.Instance;
+            if (session == null || !session.HasWreckTarget) return;
+
+            // 按目标贴图的包围盒判断：沉船很高（半高 1.5），钩子停在它头顶时
+            // 旧的「圆形半径 1.1」永远够不到，看起来就是停在宝箱顶上没反应。
+            if (!ClawTouches(session.WreckBounds, transform.position, clawTouchPad)) return;
+
+            _clawed = true;
+            if (_renderer != null && _clawFrames != null && _clawFrames.Length > 0)
+                _renderer.sprite = _clawFrames[_clawFrames.Length - 1];   // 闭合
+            GameAudio.Ensure().PlaySplash(0.8f);
+            StartReeling();
+            Debug.Log("[抓钩] 咬住海底目标，自动收线");
+        }
+
+        /// <summary>抓钩有没有碰到海底目标：目标包围盒 + 一点余量（水平、垂直分别判断）。</summary>
+        public static bool ClawTouches(Bounds targetBounds, Vector3 hookPos, float pad)
+        {
+            if (targetBounds.size.sqrMagnitude <= 0.0001f) return false;
+            return hookPos.x >= targetBounds.min.x - pad && hookPos.x <= targetBounds.max.x + pad &&
+                   hookPos.y >= targetBounds.min.y - pad && hookPos.y <= targetBounds.max.y + pad;
+        }
+
+        /// <summary>咬住之后目标挂在钩子下面一起上浮。</summary>
+        void ClawCarry()
+        {
+            if (!_clawed) return;
+            var session = FishingSession.Instance;
+            if (session != null && session.HasWreckTarget)
+                session.SetWreckPosition(transform.position + Vector3.down * clawCarryOffset);
+        }
+
+        void CatchSmall(FishEntity fish)        {
             if (_bigFish != null) return;                 // 已经挂着大鱼了，小的不要
             if (_caught.Count >= maxSmallFish) return;
 

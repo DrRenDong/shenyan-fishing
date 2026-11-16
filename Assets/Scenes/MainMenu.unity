@@ -966,10 +966,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 39aa725285946aa49bc08380a2dd5096, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  firstRowY: 30
-  rowGap: 66
-  rowSize: {x: 900, y: 56}
+  firstRowY: -4
+  rowGap: 57
+  rowSize: {x: 880, y: 54}
   hintText: {fileID: 1343021738}
+  shipPrice: 20000
+  shipComic: {fileID: 1443908146}
 --- !u!1 &235667405
 GameObject:
   m_ObjectHideFlags: 0
@@ -3048,6 +3050,7 @@ MonoBehaviour:
   - {fileID: 235667405}
   - {fileID: 2082680052}
   - {fileID: 2012502560}
+  villageBgWithShip: {fileID: 21300000, guid: 81166cc85b3ceb2489ca718840a335a1, type: 3}
   bigMapObjects:
   - {fileID: 551604713}
   restaurantObjects:
@@ -3676,6 +3679,54 @@ RectTransform:
   m_AnchoredPosition: {x: 415, y: -8.5}
   m_SizeDelta: {x: 320, y: 130}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!1 &1443908145
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1443908147}
+  - component: {fileID: 1443908146}
+  m_Layer: 0
+  m_Name: ShipComic
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1443908146
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1443908145}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f501f75bdc4e41c4e8cd4de55903af7a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  folder: "Image/UI/\u6D77\u795E\u53F7\u6F2B\u753B"
+  prefix: ship_comic_
+  pieceCount: 4
+  pageSize: {x: 974, y: 1040}
+--- !u!4 &1443908147
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1443908145}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1582809899
 GameObject:
   m_ObjectHideFlags: 0
@@ -4049,6 +4100,11 @@ MonoBehaviour:
   - {fileID: 8300000, guid: bc05b848c9044dc6ab89159bc51c7569, type: 3}
   - {fileID: 8300000, guid: 0731d987e7bc46adbe6c244f47e4be34, type: 3}
   - {fileID: 8300000, guid: 8faa095ada964cb28d2ab771e62de1b3, type: 3}
+  buildClip: {fileID: 0}
+  landClip: {fileID: 0}
+  orderClip: {fileID: 0}
+  blueprintClip: {fileID: 0}
+  powerClip: {fileID: 0}
   splashClips: []
   comboClips: []
   endRunClip: {fileID: 0}
@@ -6276,9 +6332,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d3969c9b818695646aa8ca4d6e694620, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  cardSize: {x: 920, y: 132}
-  firstCardY: 20
-  cardGap: 150
+  cardSize: {x: 920, y: 54}
+  cardGap: 59.6
 --- !u!1 &2145534570
 GameObject:
   m_ObjectHideFlags: 0
@@ -6442,3 +6497,4 @@ SceneRoots:
   - {fileID: 1609916491}
   - {fileID: 1021617031}
   - {fileID: 1656224945}
+  - {fileID: 1443908147}

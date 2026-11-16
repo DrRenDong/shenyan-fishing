@@ -37,7 +37,10 @@ namespace Shenyan
         [Header("水域")]
         [SerializeField] float surfaceY = 15.5f;          // 最高不超过水面
         [SerializeField] float bottomMargin = 1.2f;       // 离海床至少这么远
-        [SerializeField] float unknownFloorY = -14f;      // 拿不到海床高度时按这个深度算
+        [SerializeField] float unknownFloorY = -14f;
+
+        [Tooltip("被「威慑」吓到的鱼往反方向窜的速度（世界单位/秒）")]
+        [SerializeField] float fleeSpeed = 7f;      // 拿不到海床高度时按这个深度算
 
         [Header("外观")]
         [SerializeField] string sortingLayer = "Default";
@@ -46,6 +49,23 @@ namespace Shenyan
         [Header("参考")]
         [SerializeField] SandbarTerrain terrain;
         [SerializeField] TimeOfDaySystem timeSystem;
+
+        [Header("鱼种限制（海产聚集点入口）")]
+        [Tooltip("空 = 全鱼种随机；填鱼名（如「沙丁鱼」）= 这一片水域只有这种鱼")]
+        [SerializeField] string speciesFilter = "";
+
+        /// <summary>限制只刷某个品种（聚集点入口用）。传空或素材里没有该品种时退回全鱼种。</summary>
+        public void SetSpeciesFilter(string species)
+        {
+            if (string.IsNullOrEmpty(species)) { speciesFilter = ""; return; }
+            if (_sprites.Count == 0) LoadSprites();
+            foreach (var s in _sprites)
+                if (s != null && s.name == species) { speciesFilter = species; return; }
+            speciesFilter = "";
+            Debug.LogWarning($"[FishSpawner] 素材里没有「{species}」，这片海域改回全鱼种");
+        }
+
+        public string SpeciesFilter => speciesFilter;
 
         class Fish
         {
@@ -102,8 +122,57 @@ namespace Shenyan
 
         void ResolveRefs()
         {
+            // 只找「自己这个场景」里的地形：叠加加载时 FindObjectOfType 可能拿到另一份场景的对象，
+            // 导致沉底鱼按错误的海床高度浮在水体半空。
+            if (terrain == null)
+            {
+                var scene = gameObject.scene;
+                if (scene.IsValid())
+                {
+                    foreach (var root in scene.GetRootGameObjects())
+                    {
+                        var t = root.GetComponent<SandbarTerrain>();
+                        if (t == null) t = root.GetComponentInChildren<SandbarTerrain>(true);
+                        if (t != null) { terrain = t; break; }
+                    }
+                }
+            }
             if (terrain == null) terrain = FindObjectOfType<SandbarTerrain>();
+
+            if (timeSystem == null)
+            {
+                var scene = gameObject.scene;
+                if (scene.IsValid())
+                {
+                    foreach (var root in scene.GetRootGameObjects())
+                    {
+                        var t = root.GetComponent<TimeOfDaySystem>();
+                        if (t == null) t = root.GetComponentInChildren<TimeOfDaySystem>(true);
+                        if (t != null) { timeSystem = t; break; }
+                    }
+                }
+            }
             if (timeSystem == null) timeSystem = FindObjectOfType<TimeOfDaySystem>();
+        }
+
+        /// <summary>换一片海（开阔海域）之后调用：清掉按旧地形刷的鱼，等新地形就绪重新刷。</summary>
+        public void ResetForNewSea()
+        {
+            for (int i = 0; i < _fish.Count; i++)
+            {
+                var f = _fish[i];
+                if (f == null) continue;
+                if (f.entity != null)
+                {
+                    f.entity.hooked = false;
+                    f.entity.releaseRequested = false;
+                    f.entity.consumeRequested = false;
+                }
+                Deactivate(f);
+            }
+            _attractTimer = 0f;
+            _warmupFrames = 2;
+            _realizeX = float.NegativeInfinity;
         }
 
         void BuildFish()
@@ -377,7 +446,8 @@ namespace Shenyan
         /// </summary>
         void PlaceFish(Fish f, float x, float y, bool allowInView)
         {
-            float floor = TryGetFloor(x, out float fl) ? fl : unknownFloorY;
+            bool hasFloor = TryGetFloor(x, out float fl);
+            float floor = hasFloor ? fl : unknownFloorY;
 
             float bottom = floor + bottomMargin;
             float top = surfaceY;
@@ -394,6 +464,10 @@ namespace Shenyan
 
             var info = FishDatabase.Get(sprite.name);
             bool bottomDweller = info.behavior == FishBehavior.Bottom;
+
+            // 地形还没铺到这一列 / 海床离水面太近（异常值或浅滩）：沉底鱼会悬在水体半空中，这一条先跳过
+            if (bottomDweller && (!hasFloor || surfaceY - floor < 20f)) return;
+
             float placeY = bottomDweller ? Mathf.Min(floor + 0.3f, top) : y;
 
             // 巨物 12 格宽：用身体的实际包围盒再挡一次，别让脑袋从画面边上探进来
@@ -433,6 +507,7 @@ namespace Shenyan
             foreach (var s in _sprites)
             {
                 if (s == null) continue;
+                if (!string.IsNullOrEmpty(speciesFilter) && s.name != speciesFilter) continue;
                 var info = FishDatabase.Get(s.name);
                 if (depth + 0.01f < info.minDepth) continue;
                 if (IsBig(s) && CountBig(self) >= maxBigFish) continue;
@@ -493,6 +568,29 @@ namespace Shenyan
         void MoveFish(Fish f, float dt)
         {
             Vector3 p = f.node.position;
+
+            // 被「威慑」吓到：先往离开钩子的方向窜一小段。
+            // （只标一个 intimidated 记号不够 —— 鱼还贴在钩子上，下一帧照样会被勾住）
+            if (f.entity != null && f.entity.fleeTimer > 0f)
+            {
+                f.entity.fleeTimer -= dt;
+                float sx = p.x >= f.entity.fleeFrom.x ? 1f : -1f;
+                p.x += sx * fleeSpeed * dt;
+
+                float fy = p.y;
+                if (!f.bottom)
+                    fy += (p.y >= f.entity.fleeFrom.y ? 1f : -1f) * fleeSpeed * 0.35f * dt;
+                if (TryGetFloor(p.x, out float fleeFloor) && fy < fleeFloor + bottomMargin)
+                    fy = fleeFloor + bottomMargin;
+                if (fy > surfaceY) fy = surfaceY;
+
+                p.y = fy;
+                f.dir = sx >= 0f ? 1 : -1;
+                f.baseY = p.y;
+                f.node.position = p;
+                if (f.renderer != null) f.renderer.flipX = f.dir < 0;
+                return;
+            }
 
             // 饵料生效期间：半径内的鱼朝撒饵点游过去
             if (_attractTimer > 0f && !f.bottom)

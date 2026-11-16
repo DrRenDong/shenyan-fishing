@@ -29,6 +29,7 @@ namespace Shenyan
         [SerializeField] int maxDrop = 4;                      // 保底：不能降到让木桩悬空
         [SerializeField] int maxDropEndColumn = 131;            // 最后一个木桩所在列，之后解除最低地势限制
         [SerializeField] int fillBottomRow = 24;                // 每列一直填到这个行号，保证实心
+        [SerializeField] int solidExtraRows = 24;                // 深海列再往下垫多少行纯色（防止海床下方空心）
         [SerializeField] int tileDepth = 15;                     // 顶面往下铺多少格瓦片，其余纯色实心
         [SerializeField] Color solidFillColor = new Color(0.24f, 0.25f, 0.36f);
         [SerializeField] int solidSortingOrder = -5;             // 纯色层在地形之后、背景之前
@@ -45,6 +46,12 @@ namespace Shenyan
         [Header("随机")]
         [SerializeField] bool randomSeedOnPlay = true;
         [SerializeField] int seed = 0;
+
+        [Header("开阔海域（从工厂地图进入 2D 捕鱼时用）")]
+        [SerializeField] bool openSeaMode = false;          // 关掉岸台/码头落差，海床在固定深度附近小幅起伏
+        [SerializeField] int openSeaBaseDepth = 50;         // 海床到水面的平均深度（格）
+        [SerializeField] int openSeaJitter = 3;             // 深度随机浮动（± 格）
+        [SerializeField] float openSeaSurfaceY = 16f;       // 水面世界 y（把深度换算成行号）
 
         [Header("渲染")]
         [SerializeField] string sortingLayer = "Default";
@@ -115,6 +122,23 @@ namespace Shenyan
             Restart();
         }
 
+        /// <summary>切到「开阔海域」重新铺海底：固定深度 ±jitter、相邻列最多差 1 格。</summary>
+        public void ConfigureOpenSea(float surfaceY, int baseDepth, int jitter)
+        {
+            openSeaMode = true;
+            openSeaSurfaceY = surfaceY;
+            openSeaBaseDepth = Mathf.Max(1, baseDepth);
+            openSeaJitter = Mathf.Max(0, jitter);
+            Restart();
+        }
+
+        /// <summary>切回渔港的岸坡地形（重新开局时用）。</summary>
+        public void ConfigureHarbor()
+        {
+            openSeaMode = false;
+            Restart();
+        }
+
         /// <summary>给一个世界 x，返回该列海床顶面的世界 y（钩子落脚判断用）。</summary>
         public bool TryGetGroundTopY(float worldX, out float topY)
         {
@@ -162,6 +186,18 @@ namespace Shenyan
         /// <summary>前 10 格保持台地高度 → 第 11 格一次性降 2 格 → 之后 10% 概率降格。</summary>
         int NextHeight(int x)
         {
+            // 开阔海域：没有岸台、没有码头保底，海床在 baseDepth 附近 ±jitter，
+            // 相邻列最多差 1 格 —— 看起来是一片起伏很缓的深海海底。
+            if (openSeaMode)
+            {
+                int baseRow = startY + 1 - Mathf.RoundToInt(openSeaSurfaceY - openSeaBaseDepth);
+                int target = baseRow + _rng.Next(-openSeaJitter, openSeaJitter + 1);
+                if (x == 0) return target;
+
+                int prevRow = _heights[x - 1];
+                return prevRow + Mathf.Clamp(target - prevRow, -1, 1);
+            }
+
             if (x < boostColumns) return plateauHeight - boostHeight;   // 0..9 保持 -15
             if (x == boostColumns) return plateauHeight;                // 第 11 格一次性降到 -13
 
@@ -174,8 +210,11 @@ namespace Shenyan
 
         void PlaceColumn(int x, int top)
         {
-            // 顶面往下 tileDepth 格铺瓦片，再往下用纯色实心填满
-            int tileEnd = Mathf.Min(top + tileDepth - 1, fillBottomRow);
+            // 顶面往下 tileDepth 格铺瓦片，再往下用纯色实心填满。
+            // 注意：开阔海域（深度 50）时 top 比 fillBottomRow 还大，只按固定行号填的话
+            // 整列都不会生成、海床下面全是空的 —— 所以每列至少再往下垫 solidExtraRows 行。
+            int fillBottom = FillBottomOf(top);
+            int tileEnd = Mathf.Min(top + tileDepth - 1, fillBottom);
             for (int row = top; row <= tileEnd; row++)
             {
                 var cell = CellOf(x, row);
@@ -183,11 +222,17 @@ namespace Shenyan
                 else SetTile(cell, tileInner, false);
             }
 
-            for (int row = tileEnd + 1; row <= fillBottomRow; row++)
+            for (int row = tileEnd + 1; row <= fillBottom; row++)
                 SetSolid(CellOf(x, row));
 
             // 这一列的右邻现在才知道，回头把左边那格的顶面重算一遍
             if (x > 0) PlaceTop(CellOf(x - 1, _heights[x - 1]), x - 1, _heights[x - 1]);
+        }
+
+        /// <summary>这一列实心填到哪一行：固定行号与「顶面 + 瓦片深度 + 额外垫层」取更深的那个。</summary>
+        int FillBottomOf(int top)
+        {
+            return Mathf.Max(fillBottomRow, top + tileDepth + solidExtraRows);
         }
 
         /// <summary>纯色实心块（地形瓦片下方的"土体"）。</summary>
@@ -229,7 +274,7 @@ namespace Shenyan
         bool HasGround(int x, int row)
         {
             if (x < 0 || x >= _heights.Count) return false;
-            return row >= _heights[x] && row <= fillBottomRow;
+            return row >= _heights[x] && row <= FillBottomOf(_heights[x]);
         }
 
         void SetTile(Vector3Int cell, Sprite sprite, bool flipX)

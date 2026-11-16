@@ -1,3 +1,5 @@
+using UnityEngine;
+using System.Collections.Generic;
 namespace Shenyan
 {
     public enum FishBehavior
@@ -87,6 +89,46 @@ namespace Shenyan
             { "皇带鱼",     I(5, 8000, 15f, 200f,  FishBehavior.Swim) },
         };
 
+        /// <summary>图鉴里的全部鱼名（随机生成海产聚集点的品种时用）。</summary>
+        public static readonly System.Collections.Generic.IReadOnlyList<string> AllNames =
+            new System.Collections.Generic.List<string>(Table.Keys).AsReadOnly();
+
+        static string[] _pool;
+        static float[] _weights;
+        static float _weightSum;
+
+        /// <summary>
+        /// 按体型等级加权抽一条鱼：等级越低越常见（权重 = 1 / 等级^power）。
+        /// 分拣区、随机订单都用它，保证「高级鱼概率低」。
+        /// </summary>
+        public static string RandomByLevel(float power = 3f)
+        {
+            if (_pool == null)
+            {
+                var names = new List<string>(Table.Keys);
+                _pool = new string[names.Count];
+                _weights = new float[names.Count];
+                _weightSum = 0f;
+
+                float p = Mathf.Max(0.01f, power);
+                for (int k = 0; k < names.Count; k++)
+                {
+                    float lvl = Mathf.Max(1f, Table[names[k]].level);
+                    float w = 1f / Mathf.Pow(lvl, p);
+                    _pool[k] = names[k];
+                    _weights[k] = w;
+                    _weightSum += w;
+                }
+            }
+
+            float roll = UnityEngine.Random.value * _weightSum;
+            for (int k = 0; k < _pool.Length; k++)
+            {
+                roll -= _weights[k];
+                if (roll <= 0f) return _pool[k];
+            }
+            return _pool[_pool.Length - 1];
+        }
         public static bool TryGet(string name, out Info info) => Table.TryGetValue(name, out info);
 
         public static Info Get(string name)

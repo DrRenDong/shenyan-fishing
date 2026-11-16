@@ -45,6 +45,13 @@ namespace Shenyan
             if (_img != null) _img.color = _baseColor;
         }
 
+        /// <summary>运行期配置（不同界面用不同强度）。</summary>
+        public void Configure(float hover, bool pulse)
+        {
+            hoverScale = hover;
+            idlePulse = pulse;
+        }
+
         public void OnPointerEnter(PointerEventData eventData)
         {
             _hovered = true;

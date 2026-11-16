@@ -11,4 +11,10 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/SampleScene.unity
     guid: 2cda990e2423bbf4892e6590ba056729
+  - enabled: 1
+    path: Assets/Scenes/OceanMap.unity
+    guid: c7a1eb7fbb294b64ea64bffb23b22595
+  - enabled: 1
+    path: Assets/Scenes/FactoryDemo.unity
+    guid: 8e705edf607be734bb05994976036bc4
   m_configObjects: {}

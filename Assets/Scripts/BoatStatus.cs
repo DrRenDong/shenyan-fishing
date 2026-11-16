@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Shenyan
@@ -29,6 +30,31 @@ namespace Shenyan
         [SerializeField] bool settleOnlyAtNight = true; // 白天靠岸只卸货到冷链车，不结算
         [SerializeField] TimeOfDaySystem timeSystem;
 
+        [Header("开阔海域模式（工厂地图进入捕鱼）")]
+        [SerializeField] bool unlimitedFuel = false;    // 不耗油
+        public bool Dockless { get; private set; }      // 没有码头：不回港、不结算
+
+        /// <summary>本次出海按鱼种统计的渔获重量（回工厂时写进船背包）。</summary>
+        public readonly Dictionary<string, float> CatchByName = new Dictionary<string, float>();
+
+        public void RecordCatch(string fishName, float weight)
+        {
+            if (string.IsNullOrEmpty(fishName) || weight <= 0f) return;
+            CatchByName.TryGetValue(fishName, out float have);
+            CatchByName[fishName] = have + weight;
+        }
+
+        /// <summary>切到「没有码头」的开阔海域：不靠港、不补油、不结算。</summary>
+        public void SetDockless()
+        {
+            Dockless = true;
+            endRunAtDock = false;
+            unlimitedFuel = true;
+            dockX = 1e9f;
+            Fuel = maxFuel;
+            maxLoad = ShopData.MaxLoad * 10f;   // 海神号船舱 ×10
+        }
+
         [Header("召唤（大鱼战斗里用）")]
         [SerializeField, Min(0)] int turtleSummonsPerTrip = 1;   // 每次出海能用几次海龟
         [SerializeField, Min(0)] int whaleSummonsPerTrip = 1;    // 鲸鱼（天赋解锁后）
@@ -37,6 +63,13 @@ namespace Shenyan
         public float MaxLoad => maxLoad;
         public float MaxFuel => maxFuel;
         public float Load { get; private set; }
+
+        /// <summary>把工厂船上的货带进捕鱼玩法：只同步重量与条数，不结算、不算本局渔获。</summary>
+        public void SeedCargo(float load, int count)
+        {
+            Load = Mathf.Clamp(load, 0f, maxLoad);
+            CargoCount = Mathf.Max(0, count);
+        }
         public float Fuel { get; private set; }
         public int Money { get; private set; }
         public int PendingValue { get; private set; }
@@ -144,7 +177,7 @@ namespace Shenyan
             // 移动耗油
             float dx = Mathf.Abs(transform.position.x - _lastX);
             _lastX = transform.position.x;
-            if (dx > 0.0001f && Fuel > 0f)
+            if (!unlimitedFuel && dx > 0.0001f && Fuel > 0f)
                 Fuel = Mathf.Max(0f, Fuel - dx * fuelPerDistance);
 
             if (AtDock)

@@ -40,6 +40,9 @@ sysinfo.txt
 *.stackdump
 crashlytics-build.properties
 
-# ===== Codely CLI：AI 助手记忆与配置（不公开）=====
+# ===== Codely CLI：AI 助手记忆、配置、剪贴板（不公开）=====
+.codely/
+.codely.packages/
 .codely-cli/
+.codelyignore
 CODELY.md
