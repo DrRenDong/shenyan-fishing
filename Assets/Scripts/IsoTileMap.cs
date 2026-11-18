@@ -603,6 +603,9 @@ namespace Shenyan
             sr.sprite = sprite;
             sr.sortingOrder = order;
             _tileObjects[key] = go;
+
+            // 这一格的地形变了，它自己和四邻的岸线泡沫都要重算
+            RefreshShoreFoamAround(i, j);
             ApplyOverride(go);
         }
 
@@ -755,11 +758,149 @@ namespace Shenyan
                 }
 
                 float lift = height * stepWorld + LiftPixelsFor(tileName) / PixelsPerUnit;
-                if (CreateTile(i, j, tileName, lift, order, height > 0.001f ? "_top" : null) != null) count++;
+                var top = CreateTile(i, j, tileName, lift, order, height > 0.001f ? "_top" : null);
+                if (top != null) count++;
+
+                // 民居/棚屋/树林这类「立在地块上的物件」脚底铺一层接触阴影。
+                // 影子挂在瓦片下面，但局部 y 要把抬升量抵掉，才会落在地表而不是浮在半空。
+                float liftPixels = LiftPixelsFor(tileName);
+                if (top != null && liftPixels > 0.01f)
+                {
+                    float w = Mathf.Max(0.62f, top.bounds.size.x * 0.62f);
+                    IsoShadow.Attach(top.transform,
+                                     new Vector2(IsoShadow.LightOffset.x,
+                                                 IsoShadow.SurfaceCenterY - lift + IsoShadow.LightOffset.y),
+                                     order, w, IsoShadow.DefaultAlpha);
+                }
             }
 
             Debug.Log($"[IsoTileMap] 拼装完成：{count} 块，范围 i {MinI}..{MaxI} / j {MinJ}..{MaxJ}，手工装饰 {extras.Count} 个");
             BuildExtras();
+            RefreshShoreFoam();
+        }
+
+        // ---------------- 岸线泡沫 ----------------
+
+        static bool IsWaterTileName(string n)
+        {
+            if (string.IsNullOrEmpty(n)) return false;
+            return n == "深水" || n == "浅水" || n.StartsWith("水面");
+        }
+
+        /// <summary>这一格是「有地形的非水体」＝岸。</summary>
+        bool IsShore(int i, int j)
+        {
+            string n = TileAt(i, j);
+            return !string.IsNullOrEmpty(n) && !IsWaterTileName(n);
+        }
+
+        /// <summary>
+        /// 给所有「挨着岸的水格」贴泡沫：水格哪条边挨着岸就在那条边铺一张。
+        /// 四张贴图在 Assets/Resources/Image/地图瓦片/泡沫_*.png，几何和其他瓦片一致，
+        /// 所以直接挂成瓦片的子物体即可对齐。
+        /// </summary>
+        public void RefreshShoreFoam()
+        {
+            EnsureSeeded();
+            IndexTileObjectsFromChildren();
+            foreach (var key in new System.Collections.Generic.List<Vector2Int>(_tiles.Keys))
+                RefreshTileFoam(key.x, key.y);
+        }
+
+        /// <summary>
+        /// 场景里的地表精灵是按 `i_j_名字` 命名的。场景重新加载后运行时字典是空的，
+        /// 这里按名字把已有的地表精灵登记回去（跳过垫层 `_baseN`）。
+        /// </summary>
+        void IndexTileObjectsFromChildren()
+        {
+            for (int c = 0; c < transform.childCount; c++)
+            {
+                Transform ch = transform.GetChild(c);
+                if (ch == null || ch.name.Contains("_base")) continue;
+                string[] parts = ch.name.Split('_');
+                if (parts.Length < 3) continue;
+                if (!int.TryParse(parts[0], out int i) || !int.TryParse(parts[1], out int j)) continue;
+                var key = new Vector2Int(i, j);
+                if (!_tileObjects.ContainsKey(key)) _tileObjects[key] = ch.gameObject;
+            }
+        }
+
+        /// <summary>只重算某一格和它四邻的泡沫（地形改动后调用，避免全图重建）。</summary>
+        public void RefreshShoreFoamAround(int i, int j)
+        {
+            RefreshTileFoam(i, j);
+            RefreshTileFoam(i - 1, j);
+            RefreshTileFoam(i + 1, j);
+            RefreshTileFoam(i, j - 1);
+            RefreshTileFoam(i, j + 1);
+        }
+
+        void RefreshTileFoam(int i, int j)
+        {
+            var key = new Vector2Int(i, j);
+            GameObject go = FindTileObject(i, j);
+            if (go == null) return;
+            AddShoreFoam(go, key, TileAt(i, j), CellSortingOrder(i, j));
+        }
+
+        /// <summary>
+        /// 取某一格的地表精灵物体。_tileObjects 是运行时字典，场景重新加载后是空的，
+        /// 这时按 `i_j_名字` 的命名约定在子物体里兜底找一次（跳过垫层 `_baseN`）。
+        /// </summary>
+        GameObject FindTileObject(int i, int j)
+        {
+            var key = new Vector2Int(i, j);
+            if (_tileObjects.TryGetValue(key, out GameObject go) && go != null) return go;
+
+            string prefix = i + "_" + j + "_";
+            for (int c = 0; c < transform.childCount; c++)
+            {
+                Transform ch = transform.GetChild(c);
+                if (ch == null || !ch.name.StartsWith(prefix)) continue;
+                if (ch.name.Contains("_base")) continue;
+                _tileObjects[key] = ch.gameObject;
+                return ch.gameObject;
+            }
+            return null;
+        }
+
+        void AddShoreFoam(GameObject tileGo, Vector2Int key, string tileName, int order)
+        {
+            // 先清掉旧泡沫，避免重复叠层
+            for (int c = tileGo.transform.childCount - 1; c >= 0; c--)
+            {
+                Transform ch = tileGo.transform.GetChild(c);
+                if (ch == null || !ch.name.StartsWith("foam_")) continue;
+                if (Application.isPlaying) Destroy(ch.gameObject);
+                else DestroyImmediate(ch.gameObject);
+            }
+
+            if (!IsWaterTileName(tileName)) return;
+
+            int i = key.x, j = key.y;
+            // 邻接方向 → 贴图：-i 屏幕左上、-j 屏幕右上、+i 屏幕右下、+j 屏幕左下
+            TryFoam(tileGo, order, i - 1, j, "左后");
+            TryFoam(tileGo, order, i, j - 1, "右后");
+            TryFoam(tileGo, order, i + 1, j, "右前");
+            TryFoam(tileGo, order, i, j + 1, "左前");
+        }
+
+        void TryFoam(GameObject tileGo, int order, int ni, int nj, string edge)
+        {
+            if (!IsShore(ni, nj)) return;
+
+            // 每条边烘了 3 个变体，随机取一个来打散重复。
+            // 注意**绝对不能 flip**：贴图的白边就在某一条边上，
+            // flipX 会把它镜像到对面那条边（左后变右后），而且每次启动都随机。
+            Sprite sp = GetSprite($"泡沫_{edge}_{Random.Range(1, 4)}");
+            if (sp == null) return;
+
+            var go = new GameObject("foam_" + edge);
+            go.transform.SetParent(tileGo.transform, false);
+            go.transform.localPosition = new Vector3(0f, 0f, -0.003f);
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = sp;
+            sr.sortingOrder = order;
         }
 
         SpriteRenderer CreateTile(int i, int j, string tileName, float liftWorld, int sortingOrder, string suffix = null)

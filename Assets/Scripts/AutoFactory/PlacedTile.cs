@@ -241,6 +241,69 @@ namespace Shenyan
                 };
             }
             poly.points = shape;
+
+            // 脚底接触阴影（水面上的聚集点/沉船宝藏不需要）
+            if (CastsContactShadow)
+            {
+                float shadowWidth = Mathf.Max(0.62f, sprite.bounds.size.x * 0.72f);
+                IsoShadow.Attach(transform,
+                                 new Vector2(IsoShadow.LightOffset.x, IsoShadow.SurfaceCenterY + IsoShadow.LightOffset.y),
+                                 _renderer.sortingOrder - 1,
+                                 shadowWidth, IsoShadow.DefaultAlpha);
+            }
+        }
+
+        /// <summary>要不要铺接触阴影：聚集点、海底沉船/宝藏是贴在水面上的，加影子反而奇怪。</summary>
+        protected virtual bool CastsContactShadow
+            => !(this is SeaSpotBuilding) && !(this is WreckSiteTile);
+
+        /// <summary>给已经有精灵的老地块补一张脚底阴影（编辑期批量刷新用）。</summary>
+        public void RefreshShadow()
+        {
+            SpriteRenderer sr = Renderer;
+            if (sr == null || colliderOnly || sr.sprite == null) return;
+            if (!CastsContactShadow) return;
+
+            IsoShadow.Attach(transform,
+                             new Vector2(IsoShadow.LightOffset.x, IsoShadow.SurfaceCenterY + IsoShadow.LightOffset.y),
+                             sr.sortingOrder - 1,
+                             Mathf.Max(0.62f, sr.sprite.bounds.size.x * 0.72f),
+                             IsoShadow.DefaultAlpha);
+        }
+
+        // ---------------- 跟随水面起伏 ----------------
+
+        float _spriteBaseY;
+        bool _spriteBaseCaptured;
+        float _shadowBaseY;
+        bool _shadowBaseCaptured;
+
+        /// <summary>
+        /// 水面起伏用：只挪精灵（和它的脚底阴影），**不动格子坐标**，
+        /// 所以占用登记、连通性判定、寻路、点选全都不受影响。
+        /// 聚集点、沉船、宝藏这类浮在水面上的地块都走这里。
+        /// </summary>
+        public virtual void SetWaterBobOffset(float dy)
+        {
+            SpriteRenderer sr = Renderer;
+            if (sr == null) return;
+
+            Transform st = sr.transform;
+            if (!_spriteBaseCaptured)
+            {
+                _spriteBaseY = st.localPosition.y;
+                _spriteBaseCaptured = true;
+            }
+            st.localPosition = new Vector3(st.localPosition.x, _spriteBaseY + dy, st.localPosition.z);
+
+            Transform shadow = transform.Find("shadow");
+            if (shadow == null) return;
+            if (!_shadowBaseCaptured)
+            {
+                _shadowBaseY = shadow.localPosition.y;
+                _shadowBaseCaptured = true;
+            }
+            shadow.localPosition = new Vector3(shadow.localPosition.x, _shadowBaseY + dy, shadow.localPosition.z);
         }
     }
 }

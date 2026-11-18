@@ -23,6 +23,16 @@ namespace Shenyan
         public float maxSize = 45f;
         public float zoomStep = 0.12f;
         public float dragThreshold = 6f;
+        [Tooltip("缩放缓动速度，越大越快。滚轮和双指都只改目标尺寸，实际尺寸每帧缓动逼近")]
+        public float zoomLerpSpeed = 14f;
+
+        // 缩放缓动状态
+        float _targetSize;
+        float _lastSize;
+        bool _easing;
+        bool _zoomInitialized;
+        Vector2 _zoomAnchor;
+        bool _hasZoomAnchor;
 
         [Header("手机")]
         [Tooltip("双指捏合缩放灵敏度")]
@@ -105,6 +115,73 @@ namespace Shenyan
             if (targetCamera == null) return;
             targetCamera.orthographicSize = Mathf.Clamp(targetCamera.orthographicSize, minSize, maxSize);
             ClampPosition();
+            SyncZoomTarget();
+        }
+
+        /// <summary>把缓动目标对齐到相机的当前尺寸（外部直接改了 size 之后调用）。</summary>
+        public void SyncZoomTarget()
+        {
+            if (targetCamera == null) return;
+            _targetSize = targetCamera.orthographicSize;
+            _lastSize = _targetSize;
+            _easing = false;
+            _zoomInitialized = true;
+        }
+
+        /// <summary>
+        /// 每帧把实际尺寸缓动逼近目标尺寸。缩放时保持「屏幕锚点下的世界位置不动」，
+        /// 所以滚轮会以鼠标为中心平滑推拉，双指以两指中点为中心。
+        /// </summary>
+        void TickZoom()
+        {
+            if (targetCamera == null) return;
+            if (!_zoomInitialized) SyncZoomTarget();
+
+            float cur = targetCamera.orthographicSize;
+
+            // 外部脚本直接改了尺寸（切场景、强制设置）→ 认账，别把它拽回来
+            if (!_easing && Mathf.Abs(cur - _lastSize) > 0.01f)
+            {
+                SyncZoomTarget();
+                return;
+            }
+
+            if (Mathf.Abs(cur - _targetSize) < 0.0005f)
+            {
+                if (!Mathf.Approximately(cur, _targetSize))
+                {
+                    Vector3 wp = ScreenToWorld(_hasZoomAnchor ? (Vector3)_zoomAnchor : (Vector3)Input.mousePosition);
+                    targetCamera.orthographicSize = _targetSize;
+                    Vector3 wp2 = ScreenToWorld(_hasZoomAnchor ? (Vector3)_zoomAnchor : (Vector3)Input.mousePosition);
+                    targetCamera.transform.position += wp - wp2;
+                    ClampPosition();
+                }
+                _lastSize = _targetSize;
+                _easing = false;
+                return;
+            }
+
+            _easing = true;
+
+            Vector3 anchor = _hasZoomAnchor ? (Vector3)_zoomAnchor : (Vector3)Input.mousePosition;
+            Vector3 worldBefore = ScreenToWorld(anchor);
+
+            float t = 1f - Mathf.Exp(-Mathf.Max(0.01f, zoomLerpSpeed) * Time.unscaledDeltaTime);
+            float next = Mathf.Lerp(cur, _targetSize, t);
+            if (Mathf.Abs(next - _targetSize) < 0.002f) next = _targetSize;
+
+            targetCamera.orthographicSize = next;
+
+            // 正在拖地图时不要跟锚点抢位置
+            if (!(IsDragging && Input.GetMouseButton(0)))
+            {
+                Vector3 worldAfter = ScreenToWorld(anchor);
+                targetCamera.transform.position += worldBefore - worldAfter;
+            }
+            ClampPosition();
+
+            _lastSize = next;
+            if (Mathf.Approximately(next, _targetSize)) _easing = false;
         }
 
         void Update()
@@ -115,6 +192,7 @@ namespace Shenyan
             if (Input.GetKeyDown(KeyCode.H)) FocusBoat();
 
             TickFocus();
+            TickZoom();
 
             // 聚集点会随视线不断刷出来（可能跑到很远），范围隔一会儿跟着长一次，
             // 否则镜头拖不过去、远处的聚集点就指定不了（主人反馈 0,-463 那种）。
@@ -226,20 +304,20 @@ namespace Shenyan
             ClampPosition();
         }
 
-        /// <summary>朝鼠标方向缩放（factor &gt; 0 放大）。</summary>
+        /// <summary>朝某个屏幕点缩放（factor &gt; 0 放大）。只改缓动目标，实际尺寸由 TickZoom 平滑逼近。</summary>
         public void ZoomAt(Vector3 screenPoint, float factor)
         {
             if (targetCamera == null) return;
-            float before = targetCamera.orthographicSize;
+            if (!_zoomInitialized) SyncZoomTarget();
+
+            float before = _targetSize;
             float after = Mathf.Clamp(before * (1f + factor), minSize, maxSize);
             if (Mathf.Approximately(before, after)) return;
 
-            Vector3 worldBefore = ScreenToWorld(screenPoint);
-            targetCamera.orthographicSize = after;
-            Vector3 worldAfter = ScreenToWorld(screenPoint);
-            targetCamera.transform.position += worldBefore - worldAfter;
+            _targetSize = after;
+            _zoomAnchor = screenPoint;
+            _hasZoomAnchor = true;
             _focusTarget = null;              // 缩放会改变取景，取消定位缓动
-            ClampPosition();
         }
 
         void ClampPosition()

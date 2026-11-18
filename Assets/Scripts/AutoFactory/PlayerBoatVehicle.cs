@@ -21,6 +21,7 @@ namespace Shenyan
         public Vector2 bodyOffset = new Vector2(0f, 0.66f);
 
         SpriteRenderer _body;
+        SpriteRenderer _shadow;
         IsoTileMap _map;
         Sprite _frontLeft;   // 左前.png
         Sprite _backRight;   // 右后.png
@@ -66,6 +67,14 @@ namespace Shenyan
             RefreshSortingOrder();
             _body.transform.localScale = Vector3.one * Mathf.Max(0.05f, bodyScale);
             _body.transform.localPosition = new Vector3(bodyOffset.x, bodyOffset.y, 0f);
+
+            // 船底接触阴影：宽度按船体实际大小缩放（海神号比工厂小船宽得多）
+            float spriteW = _body.sprite != null ? _body.sprite.bounds.size.x * Mathf.Max(0.05f, bodyScale) : 0.9f;
+            _shadow = IsoShadow.Attach(transform,
+                                       new Vector2(IsoShadow.LightOffset.x, IsoShadow.SurfaceCenterY + IsoShadow.LightOffset.y),
+                                       (gridX + gridY) * 4,
+                                       Mathf.Max(0.7f, spriteW * 0.62f), 0.28f);
+
             ApplyClickShape();
         }
 
@@ -77,6 +86,17 @@ namespace Shenyan
         {
             if (_body == null) return;
             _body.sortingOrder = (gridX + gridY) * 4 + 20;
+            if (_shadow != null) _shadow.sortingOrder = (gridX + gridY) * 4;
+        }
+
+        /// <summary>
+        /// 水面起伏用：只挪船体贴图的垂直位置，不动格子逻辑，
+        /// 所以寻路、点选、占用登记都不受影响。
+        /// </summary>
+        public override void SetWaterBobOffset(float dy)
+        {
+            if (_body == null) return;
+            _body.transform.localPosition = new Vector3(bodyOffset.x, bodyOffset.y + dy, 0f);
         }
 
         /// <summary>
@@ -253,6 +273,8 @@ namespace Shenyan
         {
             if (!HasPath) return;
 
+            Vector2Int fromCell = new Vector2Int(gridX, gridY);
+
             for (int step = 0; step < Mathf.Max(1, cellsPerTurn) && movePath.Count > 0; step++)
             {
                 Vector2Int next = movePath[0];
@@ -275,6 +297,14 @@ namespace Shenyan
             transform.localPosition = CellToWorld(gridX, gridY);
             RefreshSortingOrder();
             if (FactoryWorld.Instance != null) FactoryWorld.Instance.Register(this);
+
+            // 走过之后在原地留一道船尾浪
+            if (fromCell.x != gridX || fromCell.y != gridY)
+            {
+                Vector3 wakePos = CellToWorld(fromCell.x, fromCell.y);
+                wakePos.y += 0.62f;
+                BoatWakeFx.Spawn(wakePos, (fromCell.x + fromCell.y) * 4, 0.9f);
+            }
 
             // 移动完立刻转向下一个航点，而不是等下一次移动
             FaceNextWaypoint();
